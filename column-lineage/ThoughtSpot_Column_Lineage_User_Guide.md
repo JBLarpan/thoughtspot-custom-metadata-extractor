@@ -160,7 +160,8 @@ The main function process_org() authenticates a new org-scoped session and then 
 | A4 | export_tml_batch() | Exports TML for every physical table GUID collected in A3 (same batch retry logic). |
 | A5 | build_phys_table_lookup() | Builds a lookup {table_guid → db_name, schema_name, connection_name} from the physical table TMLs. Ambiguous table names (same name, different GUID) are removed from the lookup to prevent wrong attribution. |
 | A6 | fetch_column_guid_lookup() | Calls metadata/search with include_details=True in batches of 10 to get the GUID of every column in every model. |
-| A7 | extract_model_columns() | Iterates all model TMLs and emits one row per column with full enrichment: column_guid, formula expression, source table, db/schema/connection details. |
+| A7 | build_formula_index() | Called once per model inside extract_model_columns(). Builds a {formula_name → expression} index from the model TML formulas list. Used to enrich formula columns with their raw expression in the output. |
+| A8 | extract_model_columns()  →  _extract_model_columns_one() | Iterates all model TMLs and emits one row per column with full enrichment: column_guid, formula expression (from A7 index), source table name and GUID (from A5 lookup), db/schema/connection details. No search_query parsing — model columns are read directly from the TML column definitions. |
 
 
 ### Sub-pass B — Liveboard Columns  (Set 1b)
@@ -180,9 +181,11 @@ The main function process_org() authenticates a new org-scoped session and then 
 
 | # | Function | What it does |
 | --- | --- | --- |
-| C1 | list_metadata() | Fetches all standalone ANSWER objects for the org. |
-| C2 | export_tml_bundle() | Exports the TML bundle for each answer. |
-| C3 | extract_answer_columns() | Same logic as extract_liveboard_columns() but for answers. Per-source formula index, search_query primary path, display-name fallback. |
+| C1 | list_metadata() | Fetches all standalone ANSWER objects for the org, paginated. System User answers excluded. |
+| C2 | export_tml_bundle() | Exports the full TML bundle for each answer (export_associated=True) — includes the answer TML plus the TML of every model, table, or view the answer references. |
+| C3 | extract_answer_columns() | Parses the bundle: builds a per-source formula index (one dict per model GUID, never merged across models), resolves the answer's data source, then extracts columns via parse_search_query() if search_query is present, or resolve_and_classify() as fallback. Identical pipeline to extract_liveboard_columns(). |
+| C4 | _classify_sq_token() | Classifies each search_query token as: answer-level formula, model-level formula, cohort, or physical column. Same function as B4 — shared between liveboard and answer passes. |
+| C5 | resolve_and_classify() | Fallback classifier used when search_query is absent: strips ThoughtSpot display prefixes (Total, Average, Month(), etc.) using _candidates(), then checks the per-source formula index and physical column lookup. Same function as B5. |
 
 
 ## Step 5 — Write Output Files
